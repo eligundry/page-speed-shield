@@ -23,7 +23,7 @@ import (
 var (
 	pageSpeedSvc *pagespeedonline.Service
 	logger       *zap.Logger
-	store        *persistence.InMemoryStore
+	store        persistence.CacheStore
 )
 
 var validInsightTypes = map[string]bool{
