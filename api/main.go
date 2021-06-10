@@ -105,6 +105,8 @@ func handler(c *gin.Context) {
 		},
 	}
 
+	servertiming.WriteHeader(c)
+
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
 
