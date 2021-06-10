@@ -5,15 +5,26 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/gin-contrib/cache"
+	"github.com/gin-contrib/cache/persistence"
+	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
+	servertiming "github.com/p768lwy3/gin-server-timing"
+	"go.uber.org/zap"
 	"google.golang.org/api/option"
 	"google.golang.org/api/pagespeedonline/v5"
 )
 
-var pageSpeedSvc *pagespeedonline.Service
+var (
+	pageSpeedSvc *pagespeedonline.Service
+	logger       *zap.Logger
+	store        *persistence.InMemoryStore
+)
 
 var validInsightTypes = map[string]bool{
 	"mobile":  true,
@@ -32,13 +43,14 @@ func constructShield(score int64) string {
 		color = "yellow"
 	}
 
-	return fmt.Sprintf("https://img.shields.io/badge/Page%%20Speed%%20Insights-%d-%s", score, color)
+	return fmt.Sprintf("Page Speed Insights-%d-%s", score, color)
 }
 
 func runPageSpeed(ctx context.Context, url string, insightType string) (int64, error) {
 	res, err := pageSpeedSvc.Pagespeedapi.Runpagespeed(url).
 		Strategy(strings.ToUpper(insightType)).
 		Category("PERFORMANCE").
+		Context(ctx).
 		Do()
 
 	if err != nil {
@@ -51,7 +63,8 @@ func runPageSpeed(ctx context.Context, url string, insightType string) (int64, e
 }
 
 func handler(c *gin.Context) {
-	url := c.Param("url")[1:]
+	timing := servertiming.FromContext(c)
+	targetURL := c.Param("url")[1:]
 	insightType := c.Param("insightType")
 
 	if _, ok := validInsightTypes[insightType]; !ok {
@@ -61,11 +74,16 @@ func handler(c *gin.Context) {
 		return
 	}
 
+	pagespeedTiming := timing.NewMetric("pageSpeed").
+		Start()
+
 	score, err := runPageSpeed(
 		c.Request.Context(),
-		url,
+		targetURL,
 		insightType,
 	)
+
+	pagespeedTiming.Stop()
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -74,12 +92,20 @@ func handler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"insightType": insightType,
-		"url":         url,
-		"pagespeed":   score,
-		"shield":      constructShield(score),
-	})
+	proxy := &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = "https"
+			req.URL.Host = "img.shields.io"
+			req.Host = "img.shields.io"
+			req.URL.Path = "/badge/" + constructShield(score)
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			resp.Header.Set("Cache-Control", "public, max-age=86400")
+			return nil
+		},
+	}
+
+	proxy.ServeHTTP(c.Writer, c.Request)
 }
 
 func init() {
@@ -93,10 +119,24 @@ func init() {
 	if err != nil {
 		log.Panicf("could not construct page speed service, %s", err)
 	}
+
+	logger, err = zap.NewProduction()
+
+	if err != nil {
+		log.Panicf("could not construct logger, %s", err)
+	}
+
+	store = persistence.NewInMemoryStore(time.Second)
 }
 
 func main() {
-	router := gin.Default()
-	router.GET("/:insightType/*url", handler)
+	router := gin.New()
+
+	// middlewares
+	router.Use(ginzap.Ginzap(logger, time.RFC3339, true))
+	router.Use(ginzap.RecoveryWithZap(logger, true))
+	router.Use(servertiming.Middleware())
+
+	router.GET("/:insightType/*url", cache.CachePage(store, time.Hour*24, handler))
 	router.Run()
 }
