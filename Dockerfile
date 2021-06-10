@@ -5,7 +5,7 @@ RUN apk update \
 
 # Install dependencies
 WORKDIR /src
-ADD ./api/go.* /src
+ADD ./api/go.* /src/
 RUN go mod download
 
 # Build the app
