@@ -10,7 +10,7 @@ RUN go mod download
 
 # Build the app
 ADD ./api/main.go /src/main.go
-RUN go build -installsuffix 'static' -o /bin/page-speed-shield main.go
+RUN CGO_ENABLED=0 go build -installsuffix 'static' -o /bin/page-speed-shield main.go
 
 FROM scratch
 COPY --from=builder /bin/page-speed-shield /bin/page-speed-shield 
