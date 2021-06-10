@@ -1,17 +1,53 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/option"
 	"google.golang.org/api/pagespeedonline/v5"
 )
 
+var pageSpeedSvc *pagespeedonline.Service
+
 var validInsightTypes = map[string]bool{
 	"mobile":  true,
 	"desktop": true,
+}
+
+func constructShield(score int64) string {
+	color := "red"
+
+	switch {
+	case score >= 90:
+		color = "green"
+	case score >= 80 && score < 90:
+		color = "orange"
+	case score >= 70 && score < 80:
+		color = "yellow"
+	}
+
+	return fmt.Sprintf("https://img.shields.io/badge/Page%%20Speed%%20Insights-%d-%s", score, color)
+}
+
+func runPageSpeed(ctx context.Context, url string, insightType string) (int64, error) {
+	res, err := pageSpeedSvc.Pagespeedapi.Runpagespeed(url).
+		Strategy(strings.ToUpper(insightType)).
+		Category("PERFORMANCE").
+		Do()
+
+	if err != nil {
+		return 0, err
+	}
+
+	score := int64(res.LighthouseResult.Categories.Performance.Score.(float64) * 100)
+
+	return score, nil
 }
 
 func handler(c *gin.Context) {
@@ -25,19 +61,11 @@ func handler(c *gin.Context) {
 		return
 	}
 
-	pageSpeedSvc, err := pagespeedonline.NewService(
+	score, err := runPageSpeed(
 		c.Request.Context(),
-		option.WithAPIKey(os.Getenv("GOOGLE_API_KEY")),
+		url,
+		insightType,
 	)
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	res, err := pageSpeedSvc.Pagespeedapi.Runpagespeed(url).Do()
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -49,9 +77,22 @@ func handler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"insightType": insightType,
 		"url":         url,
-		"pagespeed":   res.LighthouseResult.Categories.Performance.Score,
+		"pagespeed":   score,
+		"shield":      constructShield(score),
 	})
-	// c.Redirect(http.StatusTemporaryRedirect, "https://img.shields.io/badge/Page%20Speed%20Insights-99-green")
+}
+
+func init() {
+	var err error
+
+	pageSpeedSvc, err = pagespeedonline.NewService(
+		context.Background(),
+		option.WithAPIKey(os.Getenv("GOOGLE_API_KEY")),
+	)
+
+	if err != nil {
+		log.Panicf("could not construct page speed service, %s", err)
+	}
 }
 
 func main() {
