@@ -2,6 +2,9 @@
 
 This is a marriage of [Google Page Speed Insights][page-speed] and [shields.io](https://shields.io/).
 
+**Unfortunately** it doesn't work on GitHub READMEs because the image takes more than 4 seconds to render, which is the
+gateway timeout threshold for camo.github.com.
+
 ## Usage
 
 To show a badge for the Page Speed Insights score on your repo, you do the following:

@@ -75,6 +75,7 @@ func handler(c *gin.Context) {
 	}
 
 	pagespeedTiming := timing.NewMetric("pageSpeed").
+		WithDesc("Google Page Speed Insights API").
 		Start()
 
 	score, err := runPageSpeed(
